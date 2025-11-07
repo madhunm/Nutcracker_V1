@@ -1,6 +1,14 @@
-#include "uiFacade.h"
+#include "UI/uiFacade.h"
 
-// ---------- small helpers ----------
+extern "C" {
+	#include "UI/ui.h"
+	#include "UI/ui_Screen1.h"
+	#include <lvgl.h>
+}
+
+/* Helper: pick custom handle if available, else fall back */
+static inline lv_obj_t* pick(lv_obj_t* a, lv_obj_t* b) { return a ? a : b; }
+
 static void setLabelInt(lv_obj_t* lbl, int v) {
 	if (!lbl) return;
 	char buf[8];
@@ -8,25 +16,60 @@ static void setLabelInt(lv_obj_t* lbl, int v) {
 	lv_label_set_text(lbl, buf);
 }
 
-// ---------- public basics ----------
 void uiFacadeInit() {
-	// no-op: resume/unknown modals handle their own tap events
+	// Dump pointers once so we can see if anything is null
+	Serial.printf("[UI] screen=%p api=%p sec=%p rashi=%p mangala=%p batch=%p\n",
+		(void*)uic_Screen1,
+		(void*)pick(uic_apiPercentageValueLabel,    ui_apiPercentageValueLabel),
+		(void*)pick(uic_secondsPercentageValueLabel,ui_secondsPercentageValueLabel),
+		(void*)pick(uic_rashiPercentageValueLabel,  ui_rashiPercentageValueLabel),
+		(void*)pick(uic_mangalaPercentageValueLabel,ui_mangalaPercentageValueLabel),
+		(void*)pick(uic_batchResult, ui_batchResult)
+	);
 }
 
 void uiFacadeSetPercentages(int api, int seconds, int rashi, int mangala) {
-	setLabelInt(uic_apiPercentageValueLabel, api);
-	setLabelInt(uic_secondsPercentageValueLabel, seconds);
-	setLabelInt(uic_rashiPercentageValueLabel, rashi);
-	setLabelInt(uic_mangalaPercentageValueLabel, mangala);
+	lv_obj_t* apiLbl     = pick(uic_apiPercentageValueLabel,     ui_apiPercentageValueLabel);
+	lv_obj_t* secondsLbl = pick(uic_secondsPercentageValueLabel, ui_secondsPercentageValueLabel);
+	lv_obj_t* rashiLbl   = pick(uic_rashiPercentageValueLabel,   ui_rashiPercentageValueLabel);
+	lv_obj_t* mangalaLbl = pick(uic_mangalaPercentageValueLabel, ui_mangalaPercentageValueLabel);
+
+	setLabelInt(apiLbl,     api);
+	setLabelInt(secondsLbl, seconds);
+	setLabelInt(rashiLbl,   rashi);
+	setLabelInt(mangalaLbl, mangala);
+
+	// Force a redraw on all changed labels + the screen (v9-safe)
+	if (apiLbl)     lv_obj_invalidate(apiLbl);
+	if (secondsLbl) lv_obj_invalidate(secondsLbl);
+	if (rashiLbl)   lv_obj_invalidate(rashiLbl);
+	if (mangalaLbl) lv_obj_invalidate(mangalaLbl);
+	if (uic_Screen1) lv_obj_invalidate(uic_Screen1);
+
+	// If available in your LVGL config, this triggers an immediate refresh
+	#if LV_USE_REFR
+	lv_refr_now(lv_display_get_default());
+	#endif
+
+	Serial.printf("[UI] set %% -> A:%d S:%d R:%d M:%d\n", api, seconds, rashi, mangala);
 }
 
 void uiFacadeSetBatchResult(bool pass) {
-	lv_obj_t* lbl = uic_batchResult ? uic_batchResult : ui_batchResult;
+	lv_obj_t* lbl = pick(uic_batchResult, ui_batchResult);
 	if (!lbl) return;
+
 	lv_label_set_text(lbl, pass ? "PASS" : "FAIL");
 	lv_obj_set_style_text_color(lbl,
 		pass ? lv_color_hex(0x00C853) : lv_color_hex(0xD32F2F),
 		LV_PART_MAIN);
+
+	lv_obj_invalidate(lbl);
+	if (uic_Screen1) lv_obj_invalidate(uic_Screen1);
+	#if LV_USE_REFR
+	lv_refr_now(lv_display_get_default());
+	#endif
+
+	Serial.printf("[UI] batch result -> %s\n", pass ? "PASS" : "FAIL");
 }
 
 void uiFacadeClearBatchResult() {
