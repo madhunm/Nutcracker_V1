@@ -1,7 +1,15 @@
 #include "uiFacade.h"
 
 static inline lv_obj_t* pick(lv_obj_t* a, lv_obj_t* b) { return a ? a : b; }
-static lv_obj_t* percentBanner = nullptr;
+
+/* Choose the label that actually belongs to the ACTIVE screen. 
+   If one pointer is on the active screen, use it; otherwise fall back. */
+static lv_obj_t* chooseForActive(lv_obj_t* uicPtr, lv_obj_t* uiPtr) {
+	lv_obj_t* act = lv_screen_active();
+	if (uicPtr && lv_obj_get_screen(uicPtr) == act) return uicPtr;
+	if (uiPtr  && lv_obj_get_screen(uiPtr)  == act) return uiPtr;
+	return uicPtr ? uicPtr : uiPtr;
+}
 
 static void setLabelInt(lv_obj_t* lbl, int v) {
 	if (!lbl) return;
@@ -10,36 +18,42 @@ static void setLabelInt(lv_obj_t* lbl, int v) {
 	lv_label_set_text(lbl, buf);
 }
 
+// Optional tiny banner so you always see changes even if panels are hidden
+static lv_obj_t* percentBanner = nullptr;
+
 void uiFacadeInit() {
-	// Create a tiny banner so we ALWAYS see changes, even if generated labels are hidden
+	// Create banner on the ACTIVE screen (kept small at top)
 	if (!percentBanner) {
 		percentBanner = lv_label_create(lv_screen_active());
 		lv_obj_align(percentBanner, LV_ALIGN_TOP_MID, 0, 4);
 		lv_obj_move_foreground(percentBanner);
 		lv_label_set_text(percentBanner, "A:--%  S:--%  R:--%  M:--%");
 	}
-	Serial.printf("[UI] screen=%p api=%p sec=%p rashi=%p mangala=%p batch=%p\n",
-		(void*)uic_Screen1,
-		(void*)pick(uic_apiPercentageValueLabel,    ui_apiPercentageValueLabel),
-		(void*)pick(uic_secondsPercentageValueLabel,ui_secondsPercentageValueLabel),
-		(void*)pick(uic_rashiPercentageValueLabel,  ui_rashiPercentageValueLabel),
-		(void*)pick(uic_mangalaPercentageValueLabel,ui_mangalaPercentageValueLabel),
-		(void*)pick(uic_batchResult, ui_batchResult)
-	);
+
+	Serial.printf("[UI] act=%p  uic_screen=%p  ui_screen=%p\n",
+		(void*)lv_screen_active(), (void*)uic_Screen1, (void*)ui_Screen1);
+
+	// Log which value labels are on the active screen
+	lv_obj_t* a = chooseForActive(uic_apiPercentageValueLabel,     ui_apiPercentageValueLabel);
+	lv_obj_t* s = chooseForActive(uic_secondsPercentageValueLabel, ui_secondsPercentageValueLabel);
+	lv_obj_t* r = chooseForActive(uic_rashiPercentageValueLabel,   ui_rashiPercentageValueLabel);
+	lv_obj_t* m = chooseForActive(uic_mangalaPercentageValueLabel, ui_mangalaPercentageValueLabel);
+	Serial.printf("[UI] chosen  api=%p sec=%p rashi=%p mangala=%p\n", (void*)a,(void*)s,(void*)r,(void*)m);
 }
 
 void uiFacadeSetPercentages(int api, int seconds, int rashi, int mangala) {
-	lv_obj_t* apiLbl     = pick(uic_apiPercentageValueLabel,     ui_apiPercentageValueLabel);
-	lv_obj_t* secondsLbl = pick(uic_secondsPercentageValueLabel, ui_secondsPercentageValueLabel);
-	lv_obj_t* rashiLbl   = pick(uic_rashiPercentageValueLabel,   ui_rashiPercentageValueLabel);
-	lv_obj_t* mangalaLbl = pick(uic_mangalaPercentageValueLabel, ui_mangalaPercentageValueLabel);
+	// Pick the labels that belong to the ACTIVE screen
+	lv_obj_t* apiLbl     = chooseForActive(uic_apiPercentageValueLabel,     ui_apiPercentageValueLabel);
+	lv_obj_t* secondsLbl = chooseForActive(uic_secondsPercentageValueLabel, ui_secondsPercentageValueLabel);
+	lv_obj_t* rashiLbl   = chooseForActive(uic_rashiPercentageValueLabel,   ui_rashiPercentageValueLabel);
+	lv_obj_t* mangalaLbl = chooseForActive(uic_mangalaPercentageValueLabel, ui_mangalaPercentageValueLabel);
 
 	setLabelInt(apiLbl,     api);
 	setLabelInt(secondsLbl, seconds);
 	setLabelInt(rashiLbl,   rashi);
 	setLabelInt(mangalaLbl, mangala);
 
-	// update banner too
+	// Update banner too (always on active screen)
 	if (percentBanner) {
 		char line[64];
 		snprintf(line, sizeof(line), "A:%d%%  S:%d%%  R:%d%%  M:%d%%", api, seconds, rashi, mangala);
@@ -47,13 +61,11 @@ void uiFacadeSetPercentages(int api, int seconds, int rashi, int mangala) {
 		lv_obj_invalidate(percentBanner);
 	}
 
-	// force repaint on changed labels + active root
-	if (apiLbl)		lv_obj_invalidate(apiLbl);
-	if (secondsLbl)	lv_obj_invalidate(secondsLbl);
-	if (rashiLbl)	lv_obj_invalidate(rashiLbl);
-	if (mangalaLbl)	lv_obj_invalidate(mangalaLbl);
-	lv_obj_t* root = lv_screen_active();
-	if (root) lv_obj_invalidate(root);
+	if (apiLbl)     lv_obj_invalidate(apiLbl);
+	if (secondsLbl) lv_obj_invalidate(secondsLbl);
+	if (rashiLbl)   lv_obj_invalidate(rashiLbl);
+	if (mangalaLbl) lv_obj_invalidate(mangalaLbl);
+	if (lv_screen_active()) lv_obj_invalidate(lv_screen_active());
 
 	#if LV_USE_REFR
 	lv_refr_now(lv_display_get_default());
@@ -63,7 +75,8 @@ void uiFacadeSetPercentages(int api, int seconds, int rashi, int mangala) {
 }
 
 void uiFacadeSetBatchResult(bool pass) {
-	lv_obj_t* lbl = pick(uic_batchResult, ui_batchResult);
+	// Choose the PASS/FAIL label that belongs to the ACTIVE screen
+	lv_obj_t* lbl = chooseForActive(uic_batchResult, ui_batchResult);
 	if (!lbl) return;
 
 	lv_label_set_text(lbl, pass ? "PASS" : "FAIL");
@@ -72,8 +85,7 @@ void uiFacadeSetBatchResult(bool pass) {
 		LV_PART_MAIN);
 
 	lv_obj_invalidate(lbl);
-	lv_obj_t* root = lv_screen_active();
-	if (root) lv_obj_invalidate(root);
+	if (lv_screen_active()) lv_obj_invalidate(lv_screen_active());
 	#if LV_USE_REFR
 	lv_refr_now(lv_display_get_default());
 	#endif
@@ -82,12 +94,11 @@ void uiFacadeSetBatchResult(bool pass) {
 }
 
 void uiFacadeClearBatchResult() {
-	lv_obj_t* lbl = pick(uic_batchResult, ui_batchResult);
+	lv_obj_t* lbl = chooseForActive(uic_batchResult, ui_batchResult);
 	if (!lbl) return;
 	lv_label_set_text(lbl, "");
 	lv_obj_invalidate(lbl);
-	lv_obj_t* root = lv_screen_active();
-	if (root) lv_obj_invalidate(root);
+	if (lv_screen_active()) lv_obj_invalidate(lv_screen_active());
 	#if LV_USE_REFR
 	lv_refr_now(lv_display_get_default());
 	#endif
@@ -129,7 +140,7 @@ void uiFacadePoll() {
 	if (doBatch) uiFacadeSetBatchResult(pass);
 }
 
-/* -------------------- Optional modals (safe stubs) -------------------- */
+/* -------------------- Optional stubs -------------------- */
 void uiFacadeShowResumePrompt(int, int, int, int, ResumeDecisionCb) {}
 void uiFacadeHideResumePrompt() {}
 void uiFacadeShowUnknownPrompt(UnknownChoiceCb) {}
