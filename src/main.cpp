@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include <FS.h>
 #include "fs/fsCompat.h"
+#include <esp_heap_caps.h>
 
 #include <lvgl.h>
 #include <TFT_eSPI.h>
@@ -15,7 +16,7 @@
 #include "UI/ui_Screen1.h"
 #include "UI/uiFacade.h"
 
-// -------- ADS1220 pins (unused here, but kept for completeness) --------
+// -------- ADS1220 pins (kept for completeness) --------
 #define ADS1220_CS_PIN		10
 #define ADS1220_DRDY_PIN	5
 
@@ -29,7 +30,7 @@ static void lvglCreateDisplay() {
 	const uint16_t ver = 320;
 	const uint32_t lines = 8;
 
-	lv_init();	// IMPORTANT: init LVGL first
+	lv_init();	// IMPORTANT
 
 	const size_t bufPixels = hor * lines;
 	lv_color_t* drawBuf = (lv_color_t*) heap_caps_malloc(bufPixels * sizeof(lv_color_t), MALLOC_CAP_DMA);
@@ -37,7 +38,7 @@ static void lvglCreateDisplay() {
 
 	disp = lv_tft_espi_create(hor, ver, drawBuf, bufPixels * sizeof(lv_color_t));
 	lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_0);
-	lv_display_set_default(disp);	// IMPORTANT: make it default so ui_init() binds here
+	lv_display_set_default(disp);	// IMPORTANT
 }
 
 void setup() {
@@ -59,7 +60,7 @@ void setup() {
 
 void loop() {
 	lv_timer_handler();
-	uiFacadePoll();		// apply any posted UI changes on LVGL thread
+	uiFacadePoll();		// apply posted UI changes on LVGL thread
 	webPortalPoll();
 	delay(5);
 }

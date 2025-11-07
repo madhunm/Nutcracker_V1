@@ -7,7 +7,7 @@
 #include "UI/uiFacade.h"
 #include "net/webPortal.h"
 
-// ---------- simple global server + session ----------
+// ---------- server + session ----------
 static WebServer server(80);
 static SessionManager gSession;
 
@@ -101,10 +101,10 @@ static void handleEnd() {
 	bool passed = false;
 	String why = "";
 	if (cc.total() > 0) {
-		if (api < 25.0f)				why = "api<25%";
+		if (api < 25.0f)					why = "api<25%";
 		else if (sec < 2.0f || sec > 7.0f)	why = "seconds out of [2,7]%";
-		else if (man >= 2.0f)			why = "mangala>=2%";
-		else							passed = true;
+		else if (man >= 2.0f)				why = "mangala>=2%";
+		else								passed = true;
 	} else {
 		why = "empty";
 	}
@@ -131,6 +131,7 @@ void webPortalBegin() {
 
 	server.on("/", HTTP_GET, sendIndex);
 	server.on("/health", HTTP_GET, handleHealth);
+	server.on("/favicon.ico", HTTP_GET, [](){ server.send(204); });	// quiet 404 noise
 
 	server.on("/api/session/start", HTTP_POST, handleStart);
 	server.on("/api/simulate", HTTP_POST, handleSim);

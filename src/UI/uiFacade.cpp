@@ -1,6 +1,7 @@
 #include "uiFacade.h"
 
 static inline lv_obj_t* pick(lv_obj_t* a, lv_obj_t* b) { return a ? a : b; }
+static lv_obj_t* percentBanner = nullptr;
 
 static void setLabelInt(lv_obj_t* lbl, int v) {
 	if (!lbl) return;
@@ -10,6 +11,13 @@ static void setLabelInt(lv_obj_t* lbl, int v) {
 }
 
 void uiFacadeInit() {
+	// Create a tiny banner so we ALWAYS see changes, even if generated labels are hidden
+	if (!percentBanner) {
+		percentBanner = lv_label_create(lv_screen_active());
+		lv_obj_align(percentBanner, LV_ALIGN_TOP_MID, 0, 4);
+		lv_obj_move_foreground(percentBanner);
+		lv_label_set_text(percentBanner, "A:--%  S:--%  R:--%  M:--%");
+	}
 	Serial.printf("[UI] screen=%p api=%p sec=%p rashi=%p mangala=%p batch=%p\n",
 		(void*)uic_Screen1,
 		(void*)pick(uic_apiPercentageValueLabel,    ui_apiPercentageValueLabel),
@@ -31,11 +39,21 @@ void uiFacadeSetPercentages(int api, int seconds, int rashi, int mangala) {
 	setLabelInt(rashiLbl,   rashi);
 	setLabelInt(mangalaLbl, mangala);
 
-	if (apiLbl)     lv_obj_invalidate(apiLbl);
-	if (secondsLbl) lv_obj_invalidate(secondsLbl);
-	if (rashiLbl)   lv_obj_invalidate(rashiLbl);
-	if (mangalaLbl) lv_obj_invalidate(mangalaLbl);
-	if (uic_Screen1) lv_obj_invalidate(uic_Screen1);
+	// update banner too
+	if (percentBanner) {
+		char line[64];
+		snprintf(line, sizeof(line), "A:%d%%  S:%d%%  R:%d%%  M:%d%%", api, seconds, rashi, mangala);
+		lv_label_set_text(percentBanner, line);
+		lv_obj_invalidate(percentBanner);
+	}
+
+	// force repaint on changed labels + active root
+	if (apiLbl)		lv_obj_invalidate(apiLbl);
+	if (secondsLbl)	lv_obj_invalidate(secondsLbl);
+	if (rashiLbl)	lv_obj_invalidate(rashiLbl);
+	if (mangalaLbl)	lv_obj_invalidate(mangalaLbl);
+	lv_obj_t* root = lv_screen_active();
+	if (root) lv_obj_invalidate(root);
 
 	#if LV_USE_REFR
 	lv_refr_now(lv_display_get_default());
@@ -54,7 +72,8 @@ void uiFacadeSetBatchResult(bool pass) {
 		LV_PART_MAIN);
 
 	lv_obj_invalidate(lbl);
-	if (uic_Screen1) lv_obj_invalidate(uic_Screen1);
+	lv_obj_t* root = lv_screen_active();
+	if (root) lv_obj_invalidate(root);
 	#if LV_USE_REFR
 	lv_refr_now(lv_display_get_default());
 	#endif
@@ -62,13 +81,13 @@ void uiFacadeSetBatchResult(bool pass) {
 	Serial.printf("[UI] batch result -> %s\n", pass ? "PASS" : "FAIL");
 }
 
-/* NEW: clear batch result text (fixes undefined reference) */
 void uiFacadeClearBatchResult() {
 	lv_obj_t* lbl = pick(uic_batchResult, ui_batchResult);
 	if (!lbl) return;
 	lv_label_set_text(lbl, "");
 	lv_obj_invalidate(lbl);
-	if (uic_Screen1) lv_obj_invalidate(uic_Screen1);
+	lv_obj_t* root = lv_screen_active();
+	if (root) lv_obj_invalidate(root);
 	#if LV_USE_REFR
 	lv_refr_now(lv_display_get_default());
 	#endif
@@ -110,11 +129,8 @@ void uiFacadePoll() {
 	if (doBatch) uiFacadeSetBatchResult(pass);
 }
 
-/* -------------------- Optional modals (safe no-ops if unused) -------------------- */
-typedef void (*ResumeDecisionCb)(bool resumeYes);
+/* -------------------- Optional modals (safe stubs) -------------------- */
 void uiFacadeShowResumePrompt(int, int, int, int, ResumeDecisionCb) {}
 void uiFacadeHideResumePrompt() {}
-
-typedef void (*UnknownChoiceCb)(NutClass chosen);
 void uiFacadeShowUnknownPrompt(UnknownChoiceCb) {}
 void uiFacadeHideUnknownPrompt() {}

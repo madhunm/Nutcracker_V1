@@ -21,7 +21,7 @@ void uiFacadePostBatchResult(bool pass);
 // Apply posted updates on the LVGL thread (call from loop())
 void uiFacadePoll();
 
-// ---------- optional modals (no-ops if unused elsewhere) ----------
+// ---------- optional modals (stubs so link never fails even if unused) ----------
 typedef void (*ResumeDecisionCb)(bool resumeYes);
 void uiFacadeShowResumePrompt(int api, int seconds, int rashi, int mangala, ResumeDecisionCb cb);
 void uiFacadeHideResumePrompt();
