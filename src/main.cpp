@@ -159,6 +159,11 @@ void setup() {
 
 	lvglCreateDisplay();
 	ui_init();
+	// --- LVGL hello ---
+lv_obj_t* hello = lv_label_create(lv_screen_active());
+lv_label_set_text(hello, "hello lvgl");
+lv_obj_center(hello);
+
 	uiFacadeInit();
 
 	// Prompt resume if an unfinished session exists (single/double tap)

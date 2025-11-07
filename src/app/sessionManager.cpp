@@ -156,3 +156,164 @@ bool SessionManager::writeResult(bool passed, float api, float seconds, float ra
 	f.close();
 	return true;
 }
+
+// ---- helpers for JSON reading (tiny & tolerant) ----
+static bool sm_readSessionJsonAtPath(const String& dirPath, ClassCounts& counts, uint32_t& lastIdx) {
+	fs::File f = FSYS.open(dirPath + "/session.json", "r");
+	if (!f) return false;
+	String js; js.reserve(512);
+	while (f.available()) js += (char)f.read();
+	f.close();
+
+	auto grabNum = [&](const char* key, const char* parent) -> uint32_t {
+		if (parent) {
+			const int p0 = js.indexOf(String("\"") + parent + "\":");
+			if (p0 < 0) return 0;
+			const int p1 = js.indexOf(String("\"") + key + "\":", p0);
+			if (p1 < 0) return 0;
+			return (uint32_t) js.substring(p1 + strlen(key) + 3).toInt();
+		} else {
+			const int p = js.indexOf(String("\"") + key + "\":");
+			if (p < 0) return 0;
+			return (uint32_t) js.substring(p + strlen(key) + 3).toInt();
+		}
+	};
+
+	lastIdx          = grabNum("last", nullptr);
+	counts.api       = grabNum("Api", "counts");
+	counts.seconds   = grabNum("Seconds", "counts");
+	counts.rashi     = grabNum("Rashi", "counts");
+	counts.mangala   = grabNum("Mangala", "counts");
+	return true;
+}
+
+bool SessionManager::resumeIfOpen() {
+	// find newest /sessions/<folder> that has *no* result.json
+	if (!FSYS.exists("/sessions")) return false;
+	fs::File root = FSYS.open("/sessions");
+	if (!root || !root.isDirectory()) return false;
+
+	String best;
+	for (fs::File e = root.openNextFile(); e; e = root.openNextFile()) {
+		if (!e.isDirectory()) continue;
+		String dir = String(e.path());
+		if (!dir.startsWith("/")) dir = "/" + dir;
+		if (FSYS.exists(dir + "/result.json")) continue; // treated as closed
+		if (best.isEmpty() || dir > best) best = dir;    // lexicographically newest
+	}
+	if (best.isEmpty()) return false;
+
+	ClassCounts c; uint32_t last = 0;
+	if (!sm_readSessionJsonAtPath(best, c, last)) return false;
+
+	_sessionPath = best;
+	_counts = c;
+	_lastIndex = last;
+	_open = true;
+
+	Serial.printf("[SESSION] resumeIfOpen -> %s (last=%u)\n", _sessionPath.c_str(), (unsigned)_lastIndex);
+	return true;
+}
+
+// tiny CSV splitter
+static int sm_splitCsv(const String& s, char delim, String out[], int maxParts) {
+	int count = 0, start = 0;
+	for (int i = 0; i < (int)s.length() && count < maxParts - 1; ++i) {
+		if (s[i] == delim) { out[count++] = s.substring(start, i); start = i + 1; }
+	}
+	out[count++] = s.substring(start);
+	return count;
+}
+
+bool SessionManager::reclassifyLast(NutClass newClass, NutClass* oldClassOut) {
+	if (!_open || _lastIndex == 0) return false;
+	if (newClass == NutClass::Unknown) return false;
+
+	// open last CSV
+	char fileName[32];
+	snprintf(fileName, sizeof(fileName), "/nut%05u.csv", (unsigned)_lastIndex);
+	String path = _sessionPath + String(fileName);
+
+	fs::File f = FSYS.open(path, "r");
+	if (!f) return false;
+	String content; content.reserve(2048);
+	while (f.available()) content += (char)f.read();
+	f.close();
+
+	// find last data line (ignore header)
+	int lastLineStart = content.lastIndexOf('\n', content.length() - 2);
+	if (lastLineStart < 0) return false;
+	String lastLine = content.substring(lastLineStart + 1);
+	lastLine.trim();
+	if (lastLine.length() == 0) {
+		int prev = content.lastIndexOf('\n', lastLineStart - 1);
+		if (prev < 0) return false;
+		lastLine = content.substring(prev + 1, lastLineStart);
+		lastLine.trim();
+	}
+
+	// columns: t_ms,adc_code,baseline,pred_class,override_class
+	String cols[6];
+	int n = sm_splitCsv(lastLine, ',', cols, 6);
+	if (n < 4) return false;
+	NutClass pred = parseClass(cols[3]);
+	NutClass prevEff = pred;
+	if (n >= 5 && cols[4].length() > 0) prevEff = parseClass(cols[4]);
+
+	if (oldClassOut) *oldClassOut = prevEff;
+	if (prevEff == newClass) return true; // nothing to do
+
+	// adjust in-memory counts
+	switch (prevEff) {
+		case NutClass::Api:		if (_counts.api) _counts.api--; break;
+		case NutClass::Seconds:	if (_counts.seconds) _counts.seconds--; break;
+		case NutClass::Rashi:	if (_counts.rashi) _counts.rashi--; break;
+		case NutClass::Mangala:	if (_counts.mangala) _counts.mangala--; break;
+		default: break;
+	}
+	switch (newClass) {
+		case NutClass::Api:		_counts.api++; break;
+		case NutClass::Seconds:	_counts.seconds++; break;
+		case NutClass::Rashi:	_counts.rashi++; break;
+		case NutClass::Mangala:	_counts.mangala++; break;
+		default: break;
+	}
+
+	// rebuild CSV: set override_class=newClass on every data row
+	String rebuilt;
+	rebuilt.reserve(content.length() + 32);
+	int pos = 0;
+	int lineNo = 0;
+	while (pos < (int)content.length()) {
+		int end = content.indexOf('\n', pos);
+		if (end < 0) end = content.length();
+		String line = content.substring(pos, end);
+
+		if (lineNo == 0) {
+			rebuilt += line; rebuilt += '\n';
+		} else {
+			String c[6];
+			int cc = sm_splitCsv(line, ',', c, 6);
+			if (cc >= 4) {
+				rebuilt += c[0]; rebuilt += ',';
+				rebuilt += c[1]; rebuilt += ',';
+				rebuilt += c[2]; rebuilt += ',';
+				rebuilt += c[3]; rebuilt += ',';
+				rebuilt += className(newClass); // override_class
+				rebuilt += '\n';
+			} else {
+				rebuilt += line; rebuilt += '\n';
+			}
+		}
+		pos = end + 1;
+		lineNo++;
+	}
+
+	fs::File w = FSYS.open(path, "w");
+	if (!w) return false;
+	w.print(rebuilt);
+	w.close();
+
+	// persist counts
+	return writeSessionJson();
+}

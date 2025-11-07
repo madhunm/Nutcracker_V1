@@ -39,6 +39,14 @@ public:
 	// Mark a session closed in-place (used when user chooses "Start New").
 	bool markClosedAtPath(const String& path);
 
+	// Resume newest open session (no result.json); loads counts/last into memory.
+bool resumeIfOpen();
+
+// Reclassify the *last* nut; updates counts, rewrites last CSV's override_class,
+// and persists session.json. Returns true on success; sets oldClassOut if provided.
+bool reclassifyLast(NutClass newClass, NutClass* oldClassOut = nullptr);
+
+
 private:
 	bool writeSessionJson();
 	bool writeCsvForNut(uint32_t idx, NutClass cls);
