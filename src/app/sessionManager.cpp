@@ -26,14 +26,14 @@ bool SessionManager::startSession() {
 
 	time_t now = time(nullptr);
 	struct tm t; gmtime_r(&now, &t);
-	// Fallback if RTC/time not set
+	// fallback if time not set
 	if (t.tm_year < 120) { t.tm_year = 125; t.tm_mon = 10; t.tm_mday = 7; t.tm_hour = 12; t.tm_min = 0; t.tm_sec = 0; }
 
 	String base = String(sessionsDir) + "/"
 		+ four(t.tm_year + 1900) + two(t.tm_mon + 1) + two(t.tm_mday)
 		+ "_" + two(t.tm_hour) + two(t.tm_min) + two(t.tm_sec);
 
-	// Ensure uniqueness even if same timestamp repeats
+	// ensure uniqueness if same timestamp
 	String path = base;
 	for (int n = 1; FSYS.exists(path) && n <= 99; ++n) {
 		char suf[5]; snprintf(suf, sizeof(suf), "-%02d", n);
@@ -43,7 +43,6 @@ bool SessionManager::startSession() {
 		Serial.printf("[SESSION] path still exists after suffixing: %s\n", path.c_str());
 		return false;
 	}
-
 	if (!FSYS.mkdir(path)) {
 		Serial.printf("[SESSION] mkdir failed: %s\n", path.c_str());
 		return false;
@@ -69,7 +68,7 @@ bool SessionManager::addSimulatedNut(NutClass cls) {
 		case NutClass::Seconds:	_counts.seconds++;	break;
 		case NutClass::Rashi:	_counts.rashi++;	break;
 		case NutClass::Mangala:	_counts.mangala++;	break;
-		default: break;
+		default: /* Unknown */	break;
 	}
 	if (!writeCsvForNut(_lastIndex, cls)) return false;
 	return writeSessionJson();

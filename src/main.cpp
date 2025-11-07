@@ -1,12 +1,8 @@
-// main.cpp — DoIt ESP32 + TFT_eSPI + LVGL v9 (tabs, camelCase)
-// Uses lv_tft_espi_create for the display, heap DMA buffer, SoftAP portal, demo session.
-
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <FS.h>
 #include "fs/fsCompat.h"
-#include <esp_heap_caps.h>
 
 #include <lvgl.h>
 #include <TFT_eSPI.h>
@@ -16,16 +12,14 @@
 
 #include "net/webPortal.h"
 #include "UI/ui.h"
-#include "UI/alertSystem.h"
+#include "UI/ui_Screen1.h"
+#include "UI/uiFacade.h"
 
-// -------- build switches --------
-#define protoHasHardware	0	// set to 1 when ADC/touch are wired
-
-// -------- ADS1220 pins (your mapping) --------
+// -------- ADS1220 pins (your mapping; unused in this stub) --------
 #define ADS1220_CS_PIN		10
 #define ADS1220_DRDY_PIN	5
 
-// -------- objects --------
+// -------- objects (declared but not used until hardware arrives) --------
 ADS1220_WE ads(ADS1220_CS_PIN, ADS1220_DRDY_PIN);
 NS2009 ts;
 
@@ -33,103 +27,148 @@ NS2009 ts;
 static lv_display_t* disp = nullptr;
 
 static void lvglCreateDisplay() {
-	// Match your panel/UI resolution/orientation
-	const uint16_t hor = 240;	// change to 240 if your panel is 240x320 portrait
-	const uint16_t ver = 320;	// change to 320 accordingly
-	const uint32_t lines = 8;	// small partial buffer to save RAM
+	const uint16_t hor = 240;			// panel width
+	const uint16_t ver = 320;			// panel height
+	const uint32_t lines = 8;			// partial buffer lines to save RAM
 
 	const size_t bufPixels = hor * lines;
 	lv_color_t* drawBuf = (lv_color_t*) heap_caps_malloc(bufPixels * sizeof(lv_color_t), MALLOC_CAP_DMA);
-	if (!drawBuf) drawBuf = (lv_color_t*) malloc(bufPixels * sizeof(lv_color_t));	// fallback
+	if (!drawBuf) drawBuf = (lv_color_t*) malloc(bufPixels * sizeof(lv_color_t)); // fallback
 
-	// Create LVGL display bound to TFT_eSPI (TFT_eSPI is initialized internally)
 	disp = lv_tft_espi_create(hor, ver, drawBuf, bufPixels * sizeof(lv_color_t));
-	// Rotate if needed (0/90/180/270). Adjust to your mounting.
 	lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_0);
-	// If colors look swapped (BGR), enable LV_COLOR_16_SWAP 1 in lv_conf.h
 }
 
-// -------- demo session (so portal has files) --------
-static void seedSampleSession() {
-	if (!SPIFFS.exists("/sessions")) SPIFFS.mkdir("/sessions");
-	String folder = "/sessions/demo_0001";
-	if (!SPIFFS.exists(folder)) SPIFFS.mkdir(folder);
+// ---------- tiny helpers to probe for "open" session (no result.json) ----------
+static bool readSessionJsonCounts(const String& dirPath, uint32_t& last, uint32_t& api, uint32_t& seconds, uint32_t& rashi, uint32_t& mangala) {
+	fs::File f = FSYS.open(dirPath + "/session.json", "r");
+	if (!f) return false;
+	String js; js.reserve(512);
+	while (f.available()) js += (char)f.read();
+	f.close();
 
-	// session.json
-	{
-		fs::File f = SPIFFS.open(folder + "/session.json", "w");
-		if (f) {
-			f.println("{\"start\":\"2025-11-07T12:00:00Z\",\"last\":2,"
-			          "\"counts\":{\"Api\":1,\"Seconds\":1,\"Rashi\":0,\"Mangala\":0}}");
-			f.close();
+	auto grabNum = [&](const char* key, const char* parent) -> uint32_t {
+		if (parent) {
+			const int p0 = js.indexOf(String("\"") + parent + "\":");
+			if (p0 < 0) return 0;
+			const int p1 = js.indexOf(String("\"") + key + "\":", p0);
+			if (p1 < 0) return 0;
+			return (uint32_t) js.substring(p1 + strlen(key) + 3).toInt();
+		} else {
+			const int p = js.indexOf(String("\"") + key + "\":");
+			if (p < 0) return 0;
+			return (uint32_t) js.substring(p + strlen(key) + 3).toInt();
 		}
+	};
+	last    = grabNum("last", nullptr);
+	api     = grabNum("Api", "counts");
+	seconds = grabNum("Seconds", "counts");
+	rashi   = grabNum("Rashi", "counts");
+	mangala = grabNum("Mangala", "counts");
+	return true;
+}
+
+static bool findOpenSession(String& outPath, uint32_t& last, uint32_t& api, uint32_t& seconds, uint32_t& rashi, uint32_t& mangala) {
+	outPath = "";
+	last = api = seconds = rashi = mangala = 0;
+
+	if (!FSYS.exists("/sessions")) return false;
+	fs::File root = FSYS.open("/sessions");
+	if (!root || !root.isDirectory()) return false;
+
+	String best;
+	for (fs::File e = root.openNextFile(); e; e = root.openNextFile()) {
+		if (!e.isDirectory()) continue;
+		String dir = String(e.path());
+		if (!dir.startsWith("/")) dir = "/" + dir;
+		// "open" if there is no result.json
+		if (FSYS.exists(dir + "/result.json")) continue;
+
+		if (best.isEmpty() || dir > best) best = dir;
 	}
-	// two tiny CSVs
-	for (int i = 1; i <= 2; ++i) {
-		char name[24];
-		snprintf(name, sizeof(name), "/nut%02d.csv", i);
-		fs::File f = SPIFFS.open(folder + String(name), "w");
-		if (f) {
-			f.println("t_ms,adc_code,baseline,pred_class,override_class");
-			f.println("0,123,120,Api,");
-			f.println("10,140,120,Api,");
-			f.println("20,95,120,Api,");
-			f.close();
+	if (best.isEmpty()) return false;
+
+	if (!readSessionJsonCounts(best, last, api, seconds, rashi, mangala)) return false;
+	outPath = best;
+	return true;
+}
+
+static void markSessionClosed(const String& dirPath, uint32_t last, uint32_t api, uint32_t seconds, uint32_t rashi, uint32_t mangala) {
+	fs::File f = FSYS.open(dirPath + "/session.json", "w");
+	if (!f) return;
+	f.print("{\"path\":\""); f.print(dirPath); f.print("\",");
+	f.print("\"last\":"); f.print(last); f.print(",");
+	f.print("\"closed\":true,");
+	f.print("\"counts\":{");
+	f.print("\"Api\":"); f.print(api); f.print(",");
+	f.print("\"Seconds\":"); f.print(seconds); f.print(",");
+	f.print("\"Rashi\":"); f.print(rashi); f.print(",");
+	f.print("\"Mangala\":"); f.print(mangala); f.print("}}");
+	f.close();
+}
+
+static void maybePromptResume() {
+	String path;
+	uint32_t last=0, a=0, s=0, r=0, m=0;
+	if (!findOpenSession(path, last, a, s, r, m)) return;
+
+	const uint32_t tot = a + s + r + m;
+	int pa=0, ps=0, pr=0, pm=0;
+	if (tot > 0) {
+		pa = (int)((100.0f * a) / tot + 0.5f);
+		ps = (int)((100.0f * s) / tot + 0.5f);
+		pr = (int)((100.0f * r) / tot + 0.5f);
+		pm = (int)((100.0f * m) / tot + 0.5f);
+	}
+
+	// keep values for lambda
+	static String keptPath;
+	static uint32_t keptLast, ka, ks, kr, km;
+	keptPath = path; keptLast = last; ka=a; ks=s; kr=r; km=m;
+
+	auto onDecision = [](bool resumeYes){
+		if (resumeYes) {
+			// Just reflect saved percentages on the TFT
+			const uint32_t tot = ka + ks + kr + km;
+			int pa=0, ps=0, pr=0, pm=0;
+			if (tot > 0) {
+				pa = (int)((100.0f * ka) / tot + 0.5f);
+				ps = (int)((100.0f * ks) / tot + 0.5f);
+				pr = (int)((100.0f * kr) / tot + 0.5f);
+				pm = (int)((100.0f * km) / tot + 0.5f);
+			}
+			uiFacadeSetPercentages(pa, ps, pr, pm);
+			Serial.printf("[RESUME] Resumed view from %s (last=%u)\n", keptPath.c_str(), (unsigned)keptLast);
+		} else {
+			// Mark closed and reset UI
+			markSessionClosed(keptPath, keptLast, ka, ks, kr, km);
+			uiFacadeClearBatchResult();
+			uiFacadeSetPercentages(0,0,0,0);
+			Serial.printf("[RESUME] Start new; marked closed: %s\n", keptPath.c_str());
 		}
-	}
+	};
+
+	uiFacadeShowResumePrompt(pa, ps, pr, pm, onDecision);
 }
 
-// -------- optional: init when hardware arrives --------
-static void initAds1220IfPresent() {
-#if protoHasHardware
-	SPI.begin();
-	ads.setGain(ADS1220_WE_PGA_GAIN_128);
-	ads.setDataRate(ADS1220_WE_DR_600SPS);
-	ads.setVRefSource(ADS1220_WE_INTERNAL_REF_OFF);	// ratiometric (AVDD/AVSS)
-	ads.start();
-#endif
-}
-
-static void initNs2009IfPresent() {
-#if protoHasHardware
-	Wire.begin();
-#endif
-}
-
-// -------- Arduino setup/loop --------
 void setup() {
 	Serial.begin(115200);
-	delay(100);
+	delay(50);
 
-	// LVGL
-	lv_init();
+	if (!fsBegin(true)) Serial.println("[MAIN] FS mount failed");
+
 	lvglCreateDisplay();
-
-	// Build your generated UI (now it will render to the TFT)
 	ui_init();
-  alertInit();					// add this
+	uiFacadeInit();
 
+	// Prompt resume if an unfinished session exists (single/double tap)
+	maybePromptResume();
 
-	// Web portal
+	// Bring up web portal (SoftAP in webPortalBegin)
 	webPortalBegin();
-	seedSampleSession();
-
-	// Optional peripherals
-	initAds1220IfPresent();
-	initNs2009IfPresent();
-
-	Serial.println("[BOOT] TFT+LVGL ready. AP 'Areca-Classifier' → http://192.168.4.1/");
 }
 
 void loop() {
-	// Advance LVGL tick and run its handler
-	static uint32_t last = 0;
-	uint32_t now = millis();
-	lv_tick_inc(now - last);
-	last = now;
-
 	lv_timer_handler();
 	delay(5);
-
-	webPortalPoll();
 }
