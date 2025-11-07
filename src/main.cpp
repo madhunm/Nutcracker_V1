@@ -27,17 +27,26 @@ NS2009 ts;
 static lv_display_t* disp = nullptr;
 
 static void lvglCreateDisplay() {
-	const uint16_t hor = 240;			// panel width
-	const uint16_t ver = 320;			// panel height
-	const uint32_t lines = 8;			// partial buffer lines to save RAM
+	const uint16_t hor = 240;
+	const uint16_t ver = 320;
+	const uint32_t lines = 8;
 
+	// 1) Initialize LVGL
+	lv_init();
+
+	// 2) Create a draw buffer
 	const size_t bufPixels = hor * lines;
 	lv_color_t* drawBuf = (lv_color_t*) heap_caps_malloc(bufPixels * sizeof(lv_color_t), MALLOC_CAP_DMA);
 	if (!drawBuf) drawBuf = (lv_color_t*) malloc(bufPixels * sizeof(lv_color_t)); // fallback
 
+	// 3) Create and rotate the TFT_eSPI display
 	disp = lv_tft_espi_create(hor, ver, drawBuf, bufPixels * sizeof(lv_color_t));
 	lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_0);
+
+	// 4) Make it the default so ui_init() uses it
+	lv_display_set_default(disp);
 }
+
 
 // ---------- tiny helpers to probe for "open" session (no result.json) ----------
 static bool readSessionJsonCounts(const String& dirPath, uint32_t& last, uint32_t& api, uint32_t& seconds, uint32_t& rashi, uint32_t& mangala) {
@@ -159,10 +168,6 @@ void setup() {
 
 	lvglCreateDisplay();
 	ui_init();
-	// --- LVGL hello ---
-lv_obj_t* hello = lv_label_create(lv_screen_active());
-lv_label_set_text(hello, "hello lvgl");
-lv_obj_center(hello);
 
 	uiFacadeInit();
 
