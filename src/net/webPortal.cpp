@@ -246,16 +246,21 @@ void webPortalBegin() {
 	server.on("/health", HTTP_GET, []() { server.send(200, "text/plain", "OK"); });
 
 	// API routes (POST)
-	server.on("/api/session/start", HTTP_POST, [](){
-		bool ok = gSession.startSession();
-		if (ok) {
-			uiFacadeSetPercentages(0, 0, 0, 0);
-			server.send(200, "application/json", "{\"ok\":true}");
-		} else {
-			server.send(500, "application/json", "{\"ok\":false,\"err\":\"mkdir or path conflict\"}");
-		}
-		uiFacadeClearBatchResult();
-	});
+server.on("/api/session/start", HTTP_POST, [](){
+	bool ok = gSession.startSession();
+	if (ok) {
+		// Immediately reflect a fresh session on the TFT
+		uiFacadeClearBatchResult();          // clear PASS/FAIL text
+		uiFacadeSetPercentages(0, 0, 0, 0);  // show 0% for all categories
+		// optional visual ping so the operator sees it started
+		// alertFlash(NutClass::Api, 600);
+
+		server.send(200, "application/json", "{\"ok\":true}");
+	} else {
+		server.send(500, "application/json", "{\"ok\":false,\"err\":\"mkdir or path conflict\"}");
+	}
+});
+;
 
 server.on("/api/session/end", HTTP_POST, [](){
 	bool ok = gSession.endSession();

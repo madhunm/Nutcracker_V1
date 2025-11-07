@@ -180,5 +180,6 @@ void setup() {
 
 void loop() {
 	lv_timer_handler();
+	webPortalPoll();   // <-- handle incoming HTTP requests
 	delay(5);
 }
