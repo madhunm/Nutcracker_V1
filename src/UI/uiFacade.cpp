@@ -62,6 +62,18 @@ void uiFacadeSetBatchResult(bool pass) {
 	Serial.printf("[UI] batch result -> %s\n", pass ? "PASS" : "FAIL");
 }
 
+/* NEW: clear batch result text (fixes undefined reference) */
+void uiFacadeClearBatchResult() {
+	lv_obj_t* lbl = pick(uic_batchResult, ui_batchResult);
+	if (!lbl) return;
+	lv_label_set_text(lbl, "");
+	lv_obj_invalidate(lbl);
+	if (uic_Screen1) lv_obj_invalidate(uic_Screen1);
+	#if LV_USE_REFR
+	lv_refr_now(lv_display_get_default());
+	#endif
+}
+
 /* -------------------- mailbox for cross-task posts -------------------- */
 static portMUX_TYPE uiMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -98,7 +110,7 @@ void uiFacadePoll() {
 	if (doBatch) uiFacadeSetBatchResult(pass);
 }
 
-/* -------------------- Optional modals (safe no-ops if you don't use them) -------------------- */
+/* -------------------- Optional modals (safe no-ops if unused) -------------------- */
 typedef void (*ResumeDecisionCb)(bool resumeYes);
 void uiFacadeShowResumePrompt(int, int, int, int, ResumeDecisionCb) {}
 void uiFacadeHideResumePrompt() {}
