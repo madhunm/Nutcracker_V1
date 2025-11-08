@@ -216,7 +216,7 @@ bool SessionManager::resumeIfOpen() {
 }
 
 // tiny CSV splitter
-static int sm_splitCsv(const String& s, char delim, String out[], int maxParts) {
+static int splitCsv(const String& s, char delim, String out[], int maxParts) {
 	int count = 0, start = 0;
 	for (int i = 0; i < (int)s.length() && count < maxParts - 1; ++i) {
 		if (s[i] == delim) { out[count++] = s.substring(start, i); start = i + 1; }
@@ -229,7 +229,6 @@ bool SessionManager::reclassifyLast(NutClass newClass, NutClass* oldClassOut) {
 	if (!_open || _lastIndex == 0) return false;
 	if (newClass == NutClass::Unknown) return false;
 
-	// open last CSV
 	char fileName[32];
 	snprintf(fileName, sizeof(fileName), "/nut%05u.csv", (unsigned)_lastIndex);
 	String path = _sessionPath + String(fileName);
@@ -240,7 +239,6 @@ bool SessionManager::reclassifyLast(NutClass newClass, NutClass* oldClassOut) {
 	while (f.available()) content += (char)f.read();
 	f.close();
 
-	// find last data line (ignore header)
 	int lastLineStart = content.lastIndexOf('\n', content.length() - 2);
 	if (lastLineStart < 0) return false;
 	String lastLine = content.substring(lastLineStart + 1);
@@ -252,18 +250,17 @@ bool SessionManager::reclassifyLast(NutClass newClass, NutClass* oldClassOut) {
 		lastLine.trim();
 	}
 
-	// columns: t_ms,adc_code,baseline,pred_class,override_class
+	// t_ms,adc_code,baseline,pred_class,override_class
 	String cols[6];
-	int n = sm_splitCsv(lastLine, ',', cols, 6);
+	int n = splitCsv(lastLine, ',', cols, 6);
 	if (n < 4) return false;
 	NutClass pred = parseClass(cols[3]);
 	NutClass prevEff = pred;
 	if (n >= 5 && cols[4].length() > 0) prevEff = parseClass(cols[4]);
 
 	if (oldClassOut) *oldClassOut = prevEff;
-	if (prevEff == newClass) return true; // nothing to do
+	if (prevEff == newClass) return true;
 
-	// adjust in-memory counts
 	switch (prevEff) {
 		case NutClass::Api:		if (_counts.api) _counts.api--; break;
 		case NutClass::Seconds:	if (_counts.seconds) _counts.seconds--; break;
@@ -279,11 +276,9 @@ bool SessionManager::reclassifyLast(NutClass newClass, NutClass* oldClassOut) {
 		default: break;
 	}
 
-	// rebuild CSV: set override_class=newClass on every data row
-	String rebuilt;
-	rebuilt.reserve(content.length() + 32);
-	int pos = 0;
-	int lineNo = 0;
+	// rewrite CSV with override_class=newClass on every data row
+	String rebuilt; rebuilt.reserve(content.length() + 32);
+	int pos = 0; int lineNo = 0;
 	while (pos < (int)content.length()) {
 		int end = content.indexOf('\n', pos);
 		if (end < 0) end = content.length();
@@ -293,20 +288,18 @@ bool SessionManager::reclassifyLast(NutClass newClass, NutClass* oldClassOut) {
 			rebuilt += line; rebuilt += '\n';
 		} else {
 			String c[6];
-			int cc = sm_splitCsv(line, ',', c, 6);
+			int cc = splitCsv(line, ',', c, 6);
 			if (cc >= 4) {
 				rebuilt += c[0]; rebuilt += ',';
 				rebuilt += c[1]; rebuilt += ',';
 				rebuilt += c[2]; rebuilt += ',';
 				rebuilt += c[3]; rebuilt += ',';
-				rebuilt += className(newClass); // override_class
-				rebuilt += '\n';
+				rebuilt += className(newClass); rebuilt += '\n';
 			} else {
 				rebuilt += line; rebuilt += '\n';
 			}
 		}
-		pos = end + 1;
-		lineNo++;
+		pos = end + 1; lineNo++;
 	}
 
 	fs::File w = FSYS.open(path, "w");
@@ -314,6 +307,5 @@ bool SessionManager::reclassifyLast(NutClass newClass, NutClass* oldClassOut) {
 	w.print(rebuilt);
 	w.close();
 
-	// persist counts
 	return writeSessionJson();
 }

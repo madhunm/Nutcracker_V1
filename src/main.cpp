@@ -15,6 +15,7 @@
 #include "UI/ui.h"
 #include "UI/ui_Screen1.h"
 #include "UI/uiFacade.h"
+#include "UI/alertSystem.h"
 
 // -------- ADS1220 pins (kept for completeness) --------
 #define ADS1220_CS_PIN		10
@@ -51,6 +52,8 @@ void setup() {
 	ui_init();				// build the SquareLine UI on the default display
 
 	uiFacadeInit();
+	alertInit();
+
 
 	webPortalBegin();
 }
@@ -59,6 +62,7 @@ void loop() {
 	lv_timer_handler();
 
 	uiFacadePoll();		// apply posted UI changes on LVGL thread
+	alertPoll();
 
 	webPortalPoll();
 	delay(5);

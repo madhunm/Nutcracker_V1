@@ -5,17 +5,15 @@
 
 #include "app/sessionManager.h"
 #include "UI/uiFacade.h"
+#include "ui/alertSystem.h"
 #include "net/webPortal.h"
 
-// ---------- server + session ----------
 static WebServer server(80);
 static SessionManager gSession;
 
-// ---------- config ----------
 static const char* apSsid = "Areca-Classifier";
-static const char* apPass = "";	// unsecured, per your spec
+static const char* apPass = "";	// unsecured
 
-// ---------- helpers ----------
 static String htmlHeader() {
 	String h;
 	h += "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>";
@@ -26,44 +24,33 @@ static String htmlHeader() {
 
 static void sendIndex() {
 	String html = htmlHeader();
+	html += "<h2>Session</h2><div class='row'>"
+	        "<form method='post' action='/api/session/start'><button>Start Session</button></form>"
+	        "<form method='post' action='/api/session/end'><button>End Session</button></form></div>";
 
-	html += "<h2>Session</h2>";
-	html += "<div class='row'>"
-		"<form method='post' action='/api/session/start'><button>Start Session</button></form>"
-		"<form method='post' action='/api/session/end'><button>End Session</button></form>"
-	"</div>";
-
-	html += "<h2>Simulate</h2>";
-	html += "<div class='row'>"
-		"<form method='post' action='/api/simulate?class=Api'><button>+ Api</button></form>"
-		"<form method='post' action='/api/simulate?class=Seconds'><button>+ Seconds</button></form>"
-		"<form method='post' action='/api/simulate?class=Rashi'><button>+ Rashi</button></form>"
-		"<form method='post' action='/api/simulate?class=Mangala'><button>+ Mangala</button></form>"
-	"</div>";
+	html += "<h2>Simulate</h2><div class='row'>"
+	        "<form method='post' action='/api/simulate?class=Api'><button>+ Api</button></form>"
+	        "<form method='post' action='/api/simulate?class=Seconds'><button>+ Seconds</button></form>"
+	        "<form method='post' action='/api/simulate?class=Rashi'><button>+ Rashi</button></form>"
+	        "<form method='post' action='/api/simulate?class=Mangala'><button>+ Mangala</button></form>"
+	        "<form method='post' action='/api/simulate?class=Unknown'><button>+ Unknown</button></form>"
+	        "</div>";
 
 	html += "<div class='row'><a href='/health'>Health</a></div>";
 	html += "</body></html>";
 	server.send(200, "text/html", html);
 }
 
-static void sendJsonOk(const String &s) {
-	server.send(200, "application/json", s);
-}
+static void sendJsonOk(const String &s)  { server.send(200, "application/json", s); }
+static void sendJsonErr(const String &s) { server.send(500, "application/json", s); }
 
-static void sendJsonErr(const String &s) {
-	server.send(500, "application/json", s);
-}
-
-// ---------- API handlers ----------
-static void handleHealth() {
-	server.send(200, "text/plain", "OK");
-}
+static void handleHealth() { server.send(200, "text/plain", "OK"); }
 
 static void handleStart() {
 	bool ok = gSession.startSession();
 	if (ok) {
 		uiFacadeClearBatchResult();
-		uiFacadePostPercentages(0,0,0,0);	// post to LVGL thread
+		uiFacadePostPercentages(0,0,0,0);
 		sendJsonOk("{\"ok\":true}");
 	} else {
 		sendJsonErr("{\"ok\":false,\"err\":\"mkdir or path conflict\"}");
@@ -73,13 +60,22 @@ static void handleStart() {
 static void handleSim() {
 	if (!server.hasArg("class")) { server.send(400, "application/json", "{\"error\":\"missing class\"}"); return; }
 	NutClass c = SessionManager::parseClass(server.arg("class"));
-	if (c == NutClass::Unknown) { server.send(400, "application/json", "{\"error\":\"bad class\"}"); return; }
 
+	// Accept Unknown to exercise the prompt flow
 	if (!gSession.addSimulatedNut(c)) { sendJsonErr("{\"ok\":false}"); return; }
 
+	if (c == NutClass::Unknown) {
+		// Show on-device prompt; counts unchanged until user picks
+		uiFacadePostShowUnknownPrompt();
+		sendJsonOk("{\"ok\":true,\"info\":\"unknown prompted\"}");
+		return;
+	}
+
+	// Known class: update counts, UI, and flash alert
 	ClassCounts cc = gSession.getCounts();
 	float a=0,s=0,r=0,m=0; gSession.getPercentages(a,s,r,m);
 	uiFacadePostPercentages((int)roundf(a), (int)roundf(s), (int)roundf(r), (int)roundf(m));
+	alertPostFlash(c, 900);
 
 	char buf[256];
 	snprintf(buf, sizeof(buf),
@@ -121,17 +117,33 @@ static void handleEnd() {
 	sendJsonOk(String(buf));
 }
 
-// ---------- public ----------
+/* When the operator chooses a class in the Unknown prompt */
+static void onUnknownCommit(NutClass chosen) {
+	if (chosen == NutClass::Unknown) return;
+	NutClass oldC = NutClass::Unknown;
+	if (gSession.reclassifyLast(chosen, &oldC)) {
+		ClassCounts cc = gSession.getCounts();
+		float a=0,s=0,r=0,m=0; gSession.getPercentages(a,s,r,m);
+		uiFacadePostPercentages((int)roundf(a), (int)roundf(s), (int)roundf(r), (int)roundf(m));
+		alertPostFlash(chosen, 900);
+	}
+}
+
 void webPortalBegin() {
 	WiFi.mode(WIFI_AP);
 	WiFi.softAP(apSsid, apPass);
 	Serial.printf("[WEB] SoftAP %s started, IP: %s\n", apSsid, WiFi.softAPIP().toString().c_str());
 
 	gSession.begin();
+	uiFacadeRegisterUnknownCommit(onUnknownCommit);	// bridge UI selection -> session update
 
 	server.on("/", HTTP_GET, sendIndex);
 	server.on("/health", HTTP_GET, handleHealth);
-	server.on("/favicon.ico", HTTP_GET, [](){ server.send(204); });	// quiet 404 noise
+	server.on("/favicon.ico", HTTP_GET, [](){ server.send(204); });								// silence browser noise
+	server.on("/generate_204", HTTP_GET, [](){ server.send(204); });
+	server.on("/hotspot-detect.html", HTTP_GET, [](){ server.send(204); });
+	server.on("/connecttest.txt", HTTP_GET, [](){ server.send(204); });
+	server.on("/ncsi.txt", HTTP_GET, [](){ server.send(204); });
 
 	server.on("/api/session/start", HTTP_POST, handleStart);
 	server.on("/api/simulate", HTTP_POST, handleSim);

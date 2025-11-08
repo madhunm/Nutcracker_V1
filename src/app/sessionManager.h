@@ -46,7 +46,6 @@ bool resumeIfOpen();
 // and persists session.json. Returns true on success; sets oldClassOut if provided.
 bool reclassifyLast(NutClass newClass, NutClass* oldClassOut = nullptr);
 
-
 private:
 	bool writeSessionJson();
 	bool writeCsvForNut(uint32_t idx, NutClass cls);

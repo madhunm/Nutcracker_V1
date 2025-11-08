@@ -1,40 +1,36 @@
 #include "alertSystem.h"
-extern "C" {
-	#include "UI/ui.h"
-	#include "UI/ui_Screen1.h"
-	#include "UI/ui_attention_multi.h"	// uiac_* API
-	#include <lvgl.h>
-}
 
-/* one context per label */
-static uiac_ctx_t attApi;
-static uiac_ctx_t attSeconds;
-static uiac_ctx_t attRashi;
-static uiac_ctx_t attMangala;
-
+static uiac_ctx_t attApi, attSeconds, attRashi, attMangala;
 static lv_timer_t* stopTimer = nullptr;
+
+static bool pickTarget(NutClass c, uiac_ctx_t*& ctx, lv_obj_t*& obj, uiac_cat_t& cat) {
+	switch (c) {
+		case NutClass::Api:
+			ctx = &attApi;
+			obj = uic_apiPanelLabel ? uic_apiPanelLabel : uic_apiPercentageValueLabel;
+			cat = UIAC_CAT_API;     return true;
+		case NutClass::Seconds:
+			ctx = &attSeconds;
+			obj = uic_secondsPanelLabel ? uic_secondsPanelLabel : uic_secondsPercentageValueLabel;
+			cat = UIAC_CAT_SECONDS; return true;
+		case NutClass::Rashi:
+			ctx = &attRashi;
+			obj = uic_rashiPanelLabel ? uic_rashiPanelLabel : uic_rashiPercentageValueLabel;
+			cat = UIAC_CAT_RASHI;   return true;
+		case NutClass::Mangala:
+			ctx = &attMangala;
+			obj = uic_mangalaPanelLabel ? uic_mangalaPanelLabel : uic_mangalaPercentageValueLabel;
+			cat = UIAC_CAT_MANGALA; return true;
+		default:
+			return false;
+	}
+}
 
 void alertInit() {
 	uiac_init(&attApi);
 	uiac_init(&attSeconds);
 	uiac_init(&attRashi);
 	uiac_init(&attMangala);
-}
-
-/* map class -> (ctx, obj, cat). We use ui_*PanelLabel handles per your UI. */
-static uiac_ctx_t* pickCtx(NutClass c, lv_obj_t*& obj, uiac_cat_t& cat) {
-	switch (c) {
-		case NutClass::Api:
-			obj = ui_apiPanelLabel;     cat = UIAC_CAT_API;     return &attApi;
-		case NutClass::Seconds:
-			obj = ui_secondsPanelLabel; cat = UIAC_CAT_SECONDS; return &attSeconds;
-		case NutClass::Rashi:
-			obj = ui_rashiPanelLabel;   cat = UIAC_CAT_RASHI;   return &attRashi;
-		case NutClass::Mangala:
-			obj = ui_mangalaPanelLabel; cat = UIAC_CAT_MANGALA; return &attMangala;
-		default:
-			obj = nullptr; return nullptr;
-	}
 }
 
 static void stopCb(lv_timer_t* t) {
@@ -53,11 +49,29 @@ void alertStopAll() {
 }
 
 void alertFlash(NutClass cls, uint32_t ms) {
-	lv_obj_t* obj = nullptr; uiac_cat_t cat = UIAC_CAT_API;
-	uiac_ctx_t* ctx = pickCtx(cls, obj, cat);
-	if (!ctx || !obj) return;
-
+	uiac_ctx_t* ctx = nullptr; lv_obj_t* obj = nullptr; uiac_cat_t cat = UIAC_CAT_API;
+	if (!pickTarget(cls, ctx, obj, cat) || !obj || !ctx) return;
 	if (stopTimer) { lv_timer_del(stopTimer); stopTimer = nullptr; }
-	uiac_start(ctx, obj, cat);			// uses the double-flash pattern by default
-	stopTimer = lv_timer_create(stopCb, ms, ctx);	// auto-stop after ms
+	uiac_start(ctx, obj, cat);
+	stopTimer = lv_timer_create(stopCb, ms, ctx);
+}
+
+/* ---------- mailbox so HTTP thread can request a flash ---------- */
+static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool pend = false;
+static volatile NutClass pendCls = NutClass::Unknown;
+static volatile uint32_t pendMs = 0;
+
+void alertPostFlash(NutClass cls, uint32_t ms) {
+	portENTER_CRITICAL(&mux);
+	pend = true; pendCls = cls; pendMs = ms;
+	portEXIT_CRITICAL(&mux);
+}
+
+void alertPoll() {
+	bool doIt = false; NutClass c = NutClass::Unknown; uint32_t ms = 0;
+	portENTER_CRITICAL(&mux);
+	if (pend) { doIt = true; c = pendCls; ms = pendMs; pend = false; }
+	portEXIT_CRITICAL(&mux);
+	if (doIt) alertFlash(c, ms);
 }
