@@ -10,7 +10,7 @@
  */
 
 #ifndef UIAC_MAX_OBJS
-#define UIAC_MAX_OBJS 1   // single-label contexts; bump if you group items
+#define UIAC_MAX_OBJS 8   // single-label contexts; bump if you group items
 #endif
 
 /* ===== Categories ===== */

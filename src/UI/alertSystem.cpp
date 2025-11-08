@@ -1,59 +1,131 @@
 #include "alertSystem.h"
 
-static uiac_ctx_t attApi, attSeconds, attRashi, attMangala;
-static lv_timer_t* stopTimer = nullptr;
+// Per-category flash context
+struct FlashCtx {
+	lv_style_t			style;
+	bool				styleInited = false;
+	lv_obj_t*			target = nullptr;
+	lv_timer_t*			timer = nullptr;
+	uint16_t			ticksLeft = 0;
+	uint16_t			periodMs = 0;
+	bool				on = false;
+	lv_color_t			hiColor;
+};
 
-static bool pickTarget(NutClass c, uiac_ctx_t*& ctx, lv_obj_t*& obj, uiac_cat_t& cat) {
+// 4 contexts (Api, Seconds, Rashi, Mangala)
+static FlashCtx ctxApi, ctxSeconds, ctxRashi, ctxMangala;
+
+// Map NutClass -> target label + context + color
+static bool pickCtx(NutClass c, FlashCtx*& ctx) {
 	switch (c) {
 		case NutClass::Api:
-			ctx = &attApi;
-			obj = uic_apiPanelLabel ? uic_apiPanelLabel : uic_apiPercentageValueLabel;
-			cat = UIAC_CAT_API;     return true;
+			ctx = &ctxApi;
+			ctx->target = uic_apiPanelLabel ? uic_apiPanelLabel : uic_apiPercentageValueLabel;
+			ctx->hiColor = lv_color_hex(0x4CAF50);	// green
+			return ctx->target != nullptr;
+
 		case NutClass::Seconds:
-			ctx = &attSeconds;
-			obj = uic_secondsPanelLabel ? uic_secondsPanelLabel : uic_secondsPercentageValueLabel;
-			cat = UIAC_CAT_SECONDS; return true;
+			ctx = &ctxSeconds;
+			ctx->target = uic_secondsPanelLabel ? uic_secondsPanelLabel : uic_secondsPercentageValueLabel;
+			ctx->hiColor = lv_color_hex(0x1976D2);	// blue
+			return ctx->target != nullptr;
+
 		case NutClass::Rashi:
-			ctx = &attRashi;
-			obj = uic_rashiPanelLabel ? uic_rashiPanelLabel : uic_rashiPercentageValueLabel;
-			cat = UIAC_CAT_RASHI;   return true;
+			ctx = &ctxRashi;
+			ctx->target = uic_rashiPanelLabel ? uic_rashiPanelLabel : uic_rashiPercentageValueLabel;
+			ctx->hiColor = lv_color_hex(0xFF9800);	// orange
+			return ctx->target != nullptr;
+
 		case NutClass::Mangala:
-			ctx = &attMangala;
-			obj = uic_mangalaPanelLabel ? uic_mangalaPanelLabel : uic_mangalaPercentageValueLabel;
-			cat = UIAC_CAT_MANGALA; return true;
+			ctx = &ctxMangala;
+			ctx->target = uic_mangalaPanelLabel ? uic_mangalaPanelLabel : uic_mangalaPercentageValueLabel;
+			ctx->hiColor = lv_color_hex(0xD32F2F);	// red
+			return ctx->target != nullptr;
+
 		default:
+			ctx = nullptr;
 			return false;
 	}
 }
 
-void alertInit() {
-	uiac_init(&attApi);
-	uiac_init(&attSeconds);
-	uiac_init(&attRashi);
-	uiac_init(&attMangala);
+static void ensureStyle(FlashCtx* c) {
+	if (c->styleInited) return;
+	lv_style_init(&c->style);
+	lv_style_set_bg_color(&c->style, c->hiColor);
+	lv_style_set_bg_opa(&c->style, LV_OPA_90);	// mostly solid
+	lv_style_set_radius(&c->style, 6);
+	c->styleInited = true;
 }
 
-static void stopCb(lv_timer_t* t) {
-	auto* ctx = (uiac_ctx_t*) lv_timer_get_user_data(t);
-	uiac_stop(ctx);
-	lv_timer_del(t);
-	if (t == stopTimer) stopTimer = nullptr;
+// Timer toggler
+static void flashTick(lv_timer_t* t) {
+	auto* c = (FlashCtx*) lv_timer_get_user_data(t);
+	if (!c || !c->target) { lv_timer_del(t); return; }
+
+	c->on = !c->on;
+	if (c->on) {
+		lv_obj_add_style(c->target, &c->style, LV_PART_MAIN);
+	} else {
+		lv_obj_remove_style(c->target, &c->style, LV_PART_MAIN);
+	}
+	if (c->target) lv_obj_invalidate(c->target);
+
+	if (c->ticksLeft) {
+		c->ticksLeft--;
+	} else {
+		// ensure off & stop
+		lv_obj_remove_style(c->target, &c->style, LV_PART_MAIN);
+		if (c->target) lv_obj_invalidate(c->target);
+		lv_timer_del(c->timer);
+		c->timer = nullptr;
+		c->on = false;
+	}
+}
+
+void alertInit() {
+	// lazy styles; nothing to do now
 }
 
 void alertStopAll() {
-	uiac_stop(&attApi);
-	uiac_stop(&attSeconds);
-	uiac_stop(&attRashi);
-	uiac_stop(&attMangala);
-	if (stopTimer) { lv_timer_del(stopTimer); stopTimer = nullptr; }
+	auto stop = [](FlashCtx& c){
+		if (c.timer) { lv_timer_del(c.timer); c.timer = nullptr; }
+		if (c.target && c.styleInited) lv_obj_remove_style(c.target, &c.style, LV_PART_MAIN);
+		c.on = false;
+	};
+	stop(ctxApi);
+	stop(ctxSeconds);
+	stop(ctxRashi);
+	stop(ctxMangala);
 }
 
 void alertFlash(NutClass cls, uint32_t ms) {
-	uiac_ctx_t* ctx = nullptr; lv_obj_t* obj = nullptr; uiac_cat_t cat = UIAC_CAT_API;
-	if (!pickTarget(cls, ctx, obj, cat) || !obj || !ctx) return;
-	if (stopTimer) { lv_timer_del(stopTimer); stopTimer = nullptr; }
-	uiac_start(ctx, obj, cat);
-	stopTimer = lv_timer_create(stopCb, ms, ctx);
+	FlashCtx* c = nullptr;
+	if (!pickCtx(cls, c) || !c || !c->target) {
+		Serial.printf("[ALERT] skip (no target) for cls=%d\n", (int)cls);
+		return;
+	}
+
+	// configure period/ticks (double-blink-ish)
+	const uint16_t period = 150;					// ms per toggle
+	uint16_t toggles = (ms / period);
+	if (toggles < 2) toggles = 2;
+
+	// cancel ongoing
+	if (c->timer) { lv_timer_del(c->timer); c->timer = nullptr; }
+	if (c->styleInited) lv_obj_remove_style(c->target, &c->style, LV_PART_MAIN);
+	c->on = false;
+
+	ensureStyle(c);
+	c->periodMs = period;
+	c->ticksLeft = toggles;
+	c->timer = lv_timer_create(flashTick, period, c);
+
+	// immediate first "on"
+	c->on = true;
+	lv_obj_add_style(c->target, &c->style, LV_PART_MAIN);
+	lv_obj_invalidate(c->target);
+
+	Serial.printf("[ALERT] flash %d on obj=%p ticks=%u period=%u\n", (int)cls, (void*)c->target, (unsigned)c->ticksLeft, (unsigned)c->periodMs);
 }
 
 /* ---------- mailbox so HTTP thread can request a flash ---------- */

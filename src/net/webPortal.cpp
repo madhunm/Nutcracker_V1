@@ -5,7 +5,7 @@
 
 #include "app/sessionManager.h"
 #include "UI/uiFacade.h"
-#include "ui/alertSystem.h"
+#include "UI/alertSystem.h"
 #include "net/webPortal.h"
 
 static WebServer server(80);
@@ -67,7 +67,7 @@ static void handleSim() {
 	if (c == NutClass::Unknown) {
 		// Show on-device prompt; counts unchanged until user picks
 		uiFacadePostShowUnknownPrompt();
-		sendJsonOk("{\"ok\":true,\"info\":\"unknown prompted\"}");
+		server.send(200, "application/json", "{\"ok\":true,\"info\":\"unknown modal shown on device\"}");
 		return;
 	}
 
@@ -136,6 +136,14 @@ void webPortalBegin() {
 
 	gSession.begin();
 	uiFacadeRegisterUnknownCommit(onUnknownCommit);	// bridge UI selection -> session update
+	alertInit();					// set up flasher contexts after UI is ready
+
+	// quiet browser probes
+	server.on("/favicon.ico", HTTP_GET, [](){ server.send(204); });
+	server.on("/generate_204", HTTP_GET, [](){ server.send(204); });
+	server.on("/hotspot-detect.html", HTTP_GET, [](){ server.send(204); });
+	server.on("/connecttest.txt", HTTP_GET, [](){ server.send(204); });
+	server.on("/ncsi.txt", HTTP_GET, [](){ server.send(204); });
 
 	server.on("/", HTTP_GET, sendIndex);
 	server.on("/health", HTTP_GET, handleHealth);
