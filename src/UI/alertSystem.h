@@ -11,14 +11,14 @@ extern "C" {
 // Initialize highlight system (call after uiFacadeInit / ui_init)
 void alertInit();
 
-// Flash the category (LVGL thread only; use alertPostFlash from other tasks)
-void alertFlash(NutClass cls, uint32_t ms = 900);
+// Flash the category (use alertPostFlash from other tasks)
+void alertFlash(NutClass cls, uint32_t ms = 0);	// ms ignored; standardized pattern
 
 // Stop any ongoing flashes
 void alertStopAll();
 
 // Thread-safe posting from non-LVGL contexts (e.g., WebServer handlers)
-void alertPostFlash(NutClass cls, uint32_t ms = 900);
+void alertPostFlash(NutClass cls, uint32_t ms = 0);
 
 // Call once per loop() on LVGL thread to apply posted flashes
 void alertPoll();

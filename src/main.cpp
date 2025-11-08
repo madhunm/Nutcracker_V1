@@ -25,6 +25,7 @@ ADS1220_WE ads(ADS1220_CS_PIN, ADS1220_DRDY_PIN);
 NS2009 ts;
 
 static lv_display_t* disp = nullptr;
+static uint32_t lvglLastTickMs = 0;
 
 static void lvglCreateDisplay() {
 	const uint16_t hor = 240;
@@ -53,12 +54,21 @@ void setup() {
 
 	uiFacadeInit();
 	alertInit();
-
+	lvglLastTickMs = millis();
 
 	webPortalBegin();
 }
 
 void loop() {
+// Feed LVGL tick so lv_timer (blink timers, etc.) can run
+	uint32_t nowMs = millis();
+	uint32_t elapsed = nowMs - lvglLastTickMs;
+	if (elapsed > 0) {
+		lv_tick_inc(elapsed);
+		lvglLastTickMs = nowMs;
+	}
+
+
 	lv_timer_handler();
 
 	uiFacadePoll();		// apply posted UI changes on LVGL thread

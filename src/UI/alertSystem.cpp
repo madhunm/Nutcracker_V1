@@ -1,149 +1,205 @@
 #include "alertSystem.h"
 
-// Per-category flash context
-struct FlashCtx {
-	lv_style_t			style;
-	bool				styleInited = false;
-	lv_obj_t*			target = nullptr;
-	lv_timer_t*			timer = nullptr;
-	uint16_t			ticksLeft = 0;
-	uint16_t			periodMs = 0;
-	bool				on = false;
-	lv_color_t			hiColor;
+// ===== Standardized attention pattern =====
+// Burst A:  ON 160ms, OFF 120ms, ON 160ms, GAP 300ms
+// Burst B:  ON 160ms, OFF 120ms, ON 160ms, END
+static const uint16_t kDurMs[]  = {160, 120, 160, 300, 160, 120, 160, 0};
+static const uint8_t  kState[]  = {  1,   0,   1,   0,   1,   0,   1, 0};
+static const uint8_t  kPhaseMax = 7;
+
+// Category colors during flash (WCAG-friendly)
+static inline lv_color_t colorApi()     { return lv_color_hex(0x2E7D32); } // green 800
+static inline lv_color_t colorSeconds() { return lv_color_hex(0x1565C0); } // blue 800
+static inline lv_color_t colorRashi()   { return lv_color_hex(0xEF6C00); } // orange 800
+static inline lv_color_t colorMangala() { return lv_color_hex(0xC62828); } // red 800
+static inline lv_color_t colorTextOn()  { return lv_color_hex(0xFFFFFF); } // white
+
+struct StyleSnapshot {
+	lv_color_t	bgColor;
+	lv_opa_t	bgOpa;
+	lv_color_t	textColor;
+	lv_coord_t	pad;		// restore symmetrically
+	lv_coord_t	radius;
+	bool		valid = false;
 };
 
-// 4 contexts (Api, Seconds, Rashi, Mangala)
+struct FlashCtx {
+	lv_obj_t*	target = nullptr;	// uic_*PanelLabel (exact label)
+	lv_timer_t*	timer  = nullptr;
+	uint8_t		phase  = 0;
+	bool		on     = false;
+
+	StyleSnapshot orig;
+	lv_color_t	onBg;
+	lv_color_t	onText;
+};
+
+// One context per category
 static FlashCtx ctxApi, ctxSeconds, ctxRashi, ctxMangala;
 
-// Map NutClass -> target label + context + color
-static bool pickCtx(NutClass c, FlashCtx*& ctx) {
-	switch (c) {
-		case NutClass::Api:
-			ctx = &ctxApi;
-			ctx->target = uic_apiPanelLabel ? uic_apiPanelLabel : uic_apiPercentageValueLabel;
-			ctx->hiColor = lv_color_hex(0x4CAF50);	// green
-			return ctx->target != nullptr;
+// Mailbox for cross-task posting
+static portMUX_TYPE qMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool pend = false;
+static volatile NutClass pendCls = NutClass::Unknown;
 
-		case NutClass::Seconds:
-			ctx = &ctxSeconds;
-			ctx->target = uic_secondsPanelLabel ? uic_secondsPanelLabel : uic_secondsPercentageValueLabel;
-			ctx->hiColor = lv_color_hex(0x1976D2);	// blue
-			return ctx->target != nullptr;
+// ---- helpers ----
+static void snapshotStyle(lv_obj_t* o, StyleSnapshot& s) {
+	if (!o) { s.valid = false; return; }
+	s.bgColor	= lv_obj_get_style_bg_color(o, LV_PART_MAIN);
+	s.bgOpa		= lv_obj_get_style_bg_opa  (o, LV_PART_MAIN);
+	s.textColor	= lv_obj_get_style_text_color(o, LV_PART_MAIN);
+	lv_coord_t pL = lv_obj_get_style_pad_left  (o, LV_PART_MAIN);
+	lv_coord_t pR = lv_obj_get_style_pad_right (o, LV_PART_MAIN);
+	lv_coord_t pT = lv_obj_get_style_pad_top   (o, LV_PART_MAIN);
+	lv_coord_t pB = lv_obj_get_style_pad_bottom(o, LV_PART_MAIN);
+	s.pad		= (pL || pR || pT || pB) ? pL : 0;
+	s.radius	= lv_obj_get_style_radius   (o, LV_PART_MAIN);
+	s.valid		= true;
+}
 
-		case NutClass::Rashi:
-			ctx = &ctxRashi;
-			ctx->target = uic_rashiPanelLabel ? uic_rashiPanelLabel : uic_rashiPercentageValueLabel;
-			ctx->hiColor = lv_color_hex(0xFF9800);	// orange
-			return ctx->target != nullptr;
+static void applyOn(FlashCtx* c, bool on) {
+	if (!c || !c->target) return;
 
-		case NutClass::Mangala:
-			ctx = &ctxMangala;
-			ctx->target = uic_mangalaPanelLabel ? uic_mangalaPanelLabel : uic_mangalaPercentageValueLabel;
-			ctx->hiColor = lv_color_hex(0xD32F2F);	// red
-			return ctx->target != nullptr;
+	if (on) {
+		// Snapshot once on first ON
+		if (!c->orig.valid) snapshotStyle(c->target, c->orig);
 
-		default:
-			ctx = nullptr;
-			return false;
+		// Apply alert colors + subtle chrome
+		lv_obj_set_style_bg_color   (c->target, c->onBg,       0);
+		lv_obj_set_style_bg_opa     (c->target, LV_OPA_COVER,  0);
+		lv_obj_set_style_text_color (c->target, c->onText,     0);
+		lv_obj_set_style_radius     (c->target, 8,             0);
+		lv_obj_set_style_pad_all    (c->target, 4,             0);
+	} else {
+		// Restore exactly what we captured
+		if (c->orig.valid) {
+			lv_obj_set_style_bg_color   (c->target, c->orig.bgColor,   0);
+			lv_obj_set_style_bg_opa     (c->target, c->orig.bgOpa,     0);
+			lv_obj_set_style_text_color (c->target, c->orig.textColor, 0);
+			lv_obj_set_style_radius     (c->target, c->orig.radius,    0);
+			lv_obj_set_style_pad_all    (c->target, c->orig.pad,       0);
+		} else {
+			lv_obj_set_style_bg_opa     (c->target, LV_OPA_TRANSP,     0);
+		}
 	}
+	lv_obj_invalidate(c->target);
 }
 
-static void ensureStyle(FlashCtx* c) {
-	if (c->styleInited) return;
-	lv_style_init(&c->style);
-	lv_style_set_bg_color(&c->style, c->hiColor);
-	lv_style_set_bg_opa(&c->style, LV_OPA_90);	// mostly solid
-	lv_style_set_radius(&c->style, 6);
-	c->styleInited = true;
-}
-
-// Timer toggler
-static void flashTick(lv_timer_t* t) {
+static void tickPhase(lv_timer_t* t) {
 	auto* c = (FlashCtx*) lv_timer_get_user_data(t);
 	if (!c || !c->target) { lv_timer_del(t); return; }
 
-	c->on = !c->on;
-	if (c->on) {
-		lv_obj_add_style(c->target, &c->style, LV_PART_MAIN);
-	} else {
-		lv_obj_remove_style(c->target, &c->style, LV_PART_MAIN);
+	bool wantOn = kState[c->phase] != 0;
+	if (wantOn != c->on) {
+		c->on = wantOn;
+		applyOn(c, c->on);
 	}
-	if (c->target) lv_obj_invalidate(c->target);
 
-	if (c->ticksLeft) {
-		c->ticksLeft--;
-	} else {
-		// ensure off & stop
-		lv_obj_remove_style(c->target, &c->style, LV_PART_MAIN);
-		if (c->target) lv_obj_invalidate(c->target);
+	// End?
+	if (kDurMs[c->phase + 1] == 0) {
+		applyOn(c, false);		// ensure fully restored
 		lv_timer_del(c->timer);
 		c->timer = nullptr;
-		c->on = false;
-	}
-}
-
-void alertInit() {
-	// lazy styles; nothing to do now
-}
-
-void alertStopAll() {
-	auto stop = [](FlashCtx& c){
-		if (c.timer) { lv_timer_del(c.timer); c.timer = nullptr; }
-		if (c.target && c.styleInited) lv_obj_remove_style(c.target, &c.style, LV_PART_MAIN);
-		c.on = false;
-	};
-	stop(ctxApi);
-	stop(ctxSeconds);
-	stop(ctxRashi);
-	stop(ctxMangala);
-}
-
-void alertFlash(NutClass cls, uint32_t ms) {
-	FlashCtx* c = nullptr;
-	if (!pickCtx(cls, c) || !c || !c->target) {
-		Serial.printf("[ALERT] skip (no target) for cls=%d\n", (int)cls);
+		c->phase = 0;
+		c->on    = false;
+		c->orig.valid = false;	// resnapshot next time
 		return;
 	}
 
-	// configure period/ticks (double-blink-ish)
-	const uint16_t period = 150;					// ms per toggle
-	uint16_t toggles = (ms / period);
-	if (toggles < 2) toggles = 2;
-
-	// cancel ongoing
-	if (c->timer) { lv_timer_del(c->timer); c->timer = nullptr; }
-	if (c->styleInited) lv_obj_remove_style(c->target, &c->style, LV_PART_MAIN);
-	c->on = false;
-
-	ensureStyle(c);
-	c->periodMs = period;
-	c->ticksLeft = toggles;
-	c->timer = lv_timer_create(flashTick, period, c);
-
-	// immediate first "on"
-	c->on = true;
-	lv_obj_add_style(c->target, &c->style, LV_PART_MAIN);
-	lv_obj_invalidate(c->target);
-
-	Serial.printf("[ALERT] flash %d on obj=%p ticks=%u period=%u\n", (int)cls, (void*)c->target, (unsigned)c->ticksLeft, (unsigned)c->periodMs);
+	// Next phase
+	c->phase++;
+	lv_timer_set_period(t, kDurMs[c->phase]);
 }
 
-/* ---------- mailbox so HTTP thread can request a flash ---------- */
-static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-static volatile bool pend = false;
-static volatile NutClass pendCls = NutClass::Unknown;
-static volatile uint32_t pendMs = 0;
-
-void alertPostFlash(NutClass cls, uint32_t ms) {
-	portENTER_CRITICAL(&mux);
-	pend = true; pendCls = cls; pendMs = ms;
-	portEXIT_CRITICAL(&mux);
+static FlashCtx* mapCtx(NutClass cls) {
+	switch (cls) {
+		case NutClass::Api:     return &ctxApi;
+		case NutClass::Seconds: return &ctxSeconds;
+		case NutClass::Rashi:   return &ctxRashi;
+		case NutClass::Mangala: return &ctxMangala;
+		default: return nullptr;
+	}
 }
 
+static void bindTargetAndColors(FlashCtx* c, NutClass cls) {
+	// exact labels you asked for
+	switch (cls) {
+		case NutClass::Api:
+			c->target = uic_apiPanelLabel;
+			c->onBg   = colorApi();     c->onText = colorTextOn();
+			break;
+		case NutClass::Seconds:
+			c->target = uic_secondsPanelLabel;
+			c->onBg   = colorSeconds(); c->onText = colorTextOn();
+			break;
+		case NutClass::Rashi:
+			c->target = uic_rashiPanelLabel;
+			c->onBg   = colorRashi();   c->onText = colorTextOn();
+			break;
+		case NutClass::Mangala:
+			c->target = uic_mangalaPanelLabel;
+			c->onBg   = colorMangala(); c->onText = colorTextOn();
+			break;
+		default:
+			c->target = nullptr;
+			break;
+	}
+}
+
+static void stopOne(FlashCtx& c) {
+	if (c.timer) { lv_timer_del(c.timer); c.timer = nullptr; }
+	if (c.target) applyOn(&c, false);
+	c.phase = 0; c.on = false; c.orig.valid = false;
+}
+
+static void stopAll() {
+	stopOne(ctxApi); stopOne(ctxSeconds); stopOne(ctxRashi); stopOne(ctxMangala);
+}
+
+// ===== public API =====
+void alertInit() {
+	// nothing to do; contexts configured per flash
+}
+
+void alertStopAll() { stopAll(); }
+
+void alertFlash(NutClass cls, uint32_t /*ms*/) {
+	FlashCtx* c = mapCtx(cls);
+	if (!c) return;
+
+	// Rebind target (uic_*PanelLabel) & colors each time (in case UI reloaded)
+	bindTargetAndColors(c, cls);
+	if (!c->target) {
+		Serial.printf("[ALERT] skip (no target label) for cls=%d\n", (int)cls);
+		return;
+	}
+
+	// single visible flash at a time
+	stopAll();
+
+	// Start pattern
+	c->phase = 0; c->on = false; c->orig.valid = false;
+	if (c->timer) lv_timer_del(c->timer);
+	c->timer = lv_timer_create(tickPhase, kDurMs[c->phase], c);
+
+	// Kick first state immediately (so user sees it now, not after 160 ms)
+	tickPhase(c->timer);
+
+	Serial.printf("[ALERT] start cls=%d obj=%p\n", (int)cls, (void*)c->target);
+}
+
+// from other tasks (e.g. web server thread)
+void alertPostFlash(NutClass cls, uint32_t /*ms*/) {
+	portENTER_CRITICAL(&qMux);
+	pend = true; pendCls = cls;
+	portEXIT_CRITICAL(&qMux);
+}
+
+// LVGL-thread
 void alertPoll() {
-	bool doIt = false; NutClass c = NutClass::Unknown; uint32_t ms = 0;
-	portENTER_CRITICAL(&mux);
-	if (pend) { doIt = true; c = pendCls; ms = pendMs; pend = false; }
-	portEXIT_CRITICAL(&mux);
-	if (doIt) alertFlash(c, ms);
+	bool doIt = false; NutClass c = NutClass::Unknown;
+	portENTER_CRITICAL(&qMux);
+	if (pend) { doIt = true; c = pendCls; pend = false; }
+	portEXIT_CRITICAL(&qMux);
+	if (doIt && c != NutClass::Unknown) alertFlash(c, 0);
 }
