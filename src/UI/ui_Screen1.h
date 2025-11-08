@@ -39,18 +39,29 @@ extern lv_obj_t * ui_secondsPercentageSymbolLabel1;
 extern lv_obj_t * ui_Button;
 // CUSTOM VARIABLES
 extern lv_obj_t * uic_Screen1;
+extern lv_obj_t * uic_headerPanel;
 extern lv_obj_t * uic_headerLabel;
 extern lv_obj_t * uic_resultPanel;
 extern lv_obj_t * uic_resultLabel;
 extern lv_obj_t * uic_batchResult;
 extern lv_obj_t * uic_categoryPanel;
+extern lv_obj_t * uic_apiPanel;
 extern lv_obj_t * uic_apiPanelLabel;
 extern lv_obj_t * uic_apiPercentageValueLabel;
+extern lv_obj_t * uic_apiPercentageSymbolLabel;
+extern lv_obj_t * uic_secondsPanel;
 extern lv_obj_t * uic_secondsPanelLabel;
 extern lv_obj_t * uic_secondsPercentageValueLabel;
+extern lv_obj_t * uic_secondsPercentageSymbolLabel;
+extern lv_obj_t * uic_rashiPanel;
+extern lv_obj_t * uic_rashiPanelLabel;
 extern lv_obj_t * uic_rashiPercentageValueLabel;
+extern lv_obj_t * uic_secondsPercentageSymbolLabel2;
+extern lv_obj_t * uic_mangalaPanel;
 extern lv_obj_t * uic_mangalaPanelLabel;
 extern lv_obj_t * uic_mangalaPercentageValueLabel;
+extern lv_obj_t * uic_secondsPercentageSymbolLabel1;
+extern lv_obj_t * uic_Button;
 
 #ifdef __cplusplus
 } /*extern "C"*/

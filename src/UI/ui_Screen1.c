@@ -5,18 +5,29 @@
 
 #include "ui.h"
 
+lv_obj_t * uic_Button;
+lv_obj_t * uic_secondsPercentageSymbolLabel1;
 lv_obj_t * uic_mangalaPercentageValueLabel;
 lv_obj_t * uic_mangalaPanelLabel;
+lv_obj_t * uic_mangalaPanel;
+lv_obj_t * uic_secondsPercentageSymbolLabel2;
 lv_obj_t * uic_rashiPercentageValueLabel;
+lv_obj_t * uic_rashiPanelLabel;
+lv_obj_t * uic_rashiPanel;
+lv_obj_t * uic_secondsPercentageSymbolLabel;
 lv_obj_t * uic_secondsPercentageValueLabel;
 lv_obj_t * uic_secondsPanelLabel;
+lv_obj_t * uic_secondsPanel;
+lv_obj_t * uic_apiPercentageSymbolLabel;
 lv_obj_t * uic_apiPercentageValueLabel;
 lv_obj_t * uic_apiPanelLabel;
+lv_obj_t * uic_apiPanel;
 lv_obj_t * uic_categoryPanel;
 lv_obj_t * uic_batchResult;
 lv_obj_t * uic_resultLabel;
 lv_obj_t * uic_resultPanel;
 lv_obj_t * uic_headerLabel;
+lv_obj_t * uic_headerPanel;
 lv_obj_t * uic_Screen1;
 lv_obj_t * ui_Screen1 = NULL;
 lv_obj_t * ui_headerPanel = NULL;
@@ -391,18 +402,29 @@ void ui_Screen1_screen_init(void)
     lv_obj_set_style_bg_opa(ui_Button, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     uic_Screen1 = ui_Screen1;
+    uic_headerPanel = ui_headerPanel;
     uic_headerLabel = ui_headerLabel;
     uic_resultPanel = ui_resultPanel;
     uic_resultLabel = ui_resultLabel;
     uic_batchResult = ui_batchResult;
     uic_categoryPanel = ui_categoryPanel;
+    uic_apiPanel = ui_apiPanel;
     uic_apiPanelLabel = ui_apiPanelLabel;
     uic_apiPercentageValueLabel = ui_apiPercentageValueLabel;
+    uic_apiPercentageSymbolLabel = ui_apiPercentageSymbolLabel;
+    uic_secondsPanel = ui_secondsPanel;
     uic_secondsPanelLabel = ui_secondsPanelLabel;
     uic_secondsPercentageValueLabel = ui_secondsPercentageValueLabel;
+    uic_secondsPercentageSymbolLabel = ui_secondsPercentageSymbolLabel;
+    uic_rashiPanel = ui_rashiPanel;
+    uic_rashiPanelLabel = ui_rashiPanelLabel;
     uic_rashiPercentageValueLabel = ui_rashiPercentageValueLabel;
+    uic_secondsPercentageSymbolLabel2 = ui_secondsPercentageSymbolLabel2;
+    uic_mangalaPanel = ui_mangalaPanel;
     uic_mangalaPanelLabel = ui_mangalaPanelLabel;
     uic_mangalaPercentageValueLabel = ui_mangalaPercentageValueLabel;
+    uic_secondsPercentageSymbolLabel1 = ui_secondsPercentageSymbolLabel1;
+    uic_Button = ui_Button;
 
 }
 
@@ -413,6 +435,7 @@ void ui_Screen1_screen_destroy(void)
     // NULL screen variables
     uic_Screen1 = NULL;
     ui_Screen1 = NULL;
+    uic_headerPanel = NULL;
     ui_headerPanel = NULL;
     uic_headerLabel = NULL;
     ui_headerLabel = NULL;
@@ -424,29 +447,39 @@ void ui_Screen1_screen_destroy(void)
     ui_batchResult = NULL;
     uic_categoryPanel = NULL;
     ui_categoryPanel = NULL;
+    uic_apiPanel = NULL;
     ui_apiPanel = NULL;
     uic_apiPanelLabel = NULL;
     ui_apiPanelLabel = NULL;
     uic_apiPercentageValueLabel = NULL;
     ui_apiPercentageValueLabel = NULL;
+    uic_apiPercentageSymbolLabel = NULL;
     ui_apiPercentageSymbolLabel = NULL;
+    uic_secondsPanel = NULL;
     ui_secondsPanel = NULL;
     uic_secondsPanelLabel = NULL;
     ui_secondsPanelLabel = NULL;
     uic_secondsPercentageValueLabel = NULL;
     ui_secondsPercentageValueLabel = NULL;
+    uic_secondsPercentageSymbolLabel = NULL;
     ui_secondsPercentageSymbolLabel = NULL;
+    uic_rashiPanel = NULL;
     ui_rashiPanel = NULL;
+    uic_rashiPanelLabel = NULL;
     ui_rashiPanelLabel = NULL;
     uic_rashiPercentageValueLabel = NULL;
     ui_rashiPercentageValueLabel = NULL;
+    uic_secondsPercentageSymbolLabel2 = NULL;
     ui_secondsPercentageSymbolLabel2 = NULL;
+    uic_mangalaPanel = NULL;
     ui_mangalaPanel = NULL;
     uic_mangalaPanelLabel = NULL;
     ui_mangalaPanelLabel = NULL;
     uic_mangalaPercentageValueLabel = NULL;
     ui_mangalaPercentageValueLabel = NULL;
+    uic_secondsPercentageSymbolLabel1 = NULL;
     ui_secondsPercentageSymbolLabel1 = NULL;
+    uic_Button = NULL;
     ui_Button = NULL;
 
 }

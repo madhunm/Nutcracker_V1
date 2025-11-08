@@ -49,18 +49,17 @@ void setup() {
 
 	lvglCreateDisplay();
 	ui_init();				// build the SquareLine UI on the default display
-	uiFacadeInit();
 
-	// ensure our screen is active (in case export didn't load it)
-	extern lv_obj_t* ui_Screen1;
-	if (ui_Screen1) lv_screen_load(ui_Screen1);
+	uiFacadeInit();
 
 	webPortalBegin();
 }
 
 void loop() {
 	lv_timer_handler();
+
 	uiFacadePoll();		// apply posted UI changes on LVGL thread
+
 	webPortalPoll();
 	delay(5);
 }
