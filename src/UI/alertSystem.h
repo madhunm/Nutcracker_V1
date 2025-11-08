@@ -8,17 +8,17 @@ extern "C" {
 	#include <lvgl.h>
 }
 
-// Initialize highlight system (call after uiFacadeInit / ui_init)
+// Initialize after ui_init()/uiFacadeInit()
 void alertInit();
 
-// Flash the category (use alertPostFlash from other tasks)
-void alertFlash(NutClass cls, uint32_t ms = 0);	// ms ignored; standardized pattern
+// Start a standardized class flash (double-burst); use alertPostFlash() from web handlers
+void alertFlash(NutClass cls);
 
-// Stop any ongoing flashes
+// Stop any ongoing flashes and restore original styles
 void alertStopAll();
 
 // Thread-safe posting from non-LVGL contexts (e.g., WebServer handlers)
-void alertPostFlash(NutClass cls, uint32_t ms = 0);
+void alertPostFlash(NutClass cls);
 
-// Call once per loop() on LVGL thread to apply posted flashes
+// Call once per loop() on the LVGL thread to apply posted flashes
 void alertPoll();

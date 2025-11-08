@@ -75,7 +75,7 @@ static void handleSim() {
 	ClassCounts cc = gSession.getCounts();
 	float a=0,s=0,r=0,m=0; gSession.getPercentages(a,s,r,m);
 	uiFacadePostPercentages((int)roundf(a), (int)roundf(s), (int)roundf(r), (int)roundf(m));
-	alertPostFlash(c, 900);
+	alertPostFlash(c);
 
 	char buf[256];
 	snprintf(buf, sizeof(buf),
@@ -125,7 +125,7 @@ static void onUnknownCommit(NutClass chosen) {
 		ClassCounts cc = gSession.getCounts();
 		float a=0,s=0,r=0,m=0; gSession.getPercentages(a,s,r,m);
 		uiFacadePostPercentages((int)roundf(a), (int)roundf(s), (int)roundf(r), (int)roundf(m));
-		alertPostFlash(chosen, 900);
+		alertPostFlash(chosen);
 	}
 }
 
